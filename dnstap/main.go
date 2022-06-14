@@ -19,14 +19,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/dnstap/golang-dnstap"
 	"log"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
-
-	"github.com/dnstap/golang-dnstap"
 )
 
 type stringList []string
@@ -71,11 +70,12 @@ Quiet text output format mnemonics:
 var logger = log.New(os.Stderr, "", log.LstdFlags)
 
 func main() {
-	var tcpOutputs, unixOutputs stringList
+	var tcpOutputs, unixOutputs, s3Outputs stringList
 	var fileInputs, tcpInputs, unixInputs stringList
 
 	flag.Var(&tcpOutputs, "T", "write dnstap payloads to tcp/ip address")
 	flag.Var(&unixOutputs, "U", "write dnstap payloads to unix socket")
+	flag.Var(&s3Outputs, "S", "write dnstap payloads to AWS S3 bucket")
 	flag.Var(&fileInputs, "r", "read dnstap payloads from file")
 	flag.Var(&tcpInputs, "l", "read dnstap payloads from tcp/ip")
 	flag.Var(&unixInputs, "u", "read dnstap payloads from unix socket")
@@ -110,7 +110,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dnstap: Unix socket error: %v\n", err)
 		os.Exit(1)
 	}
-	if *flagWriteFile != "" || len(tcpOutputs)+len(unixOutputs) == 0 {
+	if err := addS3Outputs(output, s3Outputs); err != nil {
+		fmt.Fprintf(os.Stderr, "dnstap: s3 outputs error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *flagWriteFile != "" || len(tcpOutputs)+len(unixOutputs)+len(s3Outputs) == 0 {
 		var format dnstap.TextFormatFunc
 
 		switch {
@@ -171,8 +176,8 @@ func main() {
 		iwg.Add(1)
 		go runInput(i, output, &iwg)
 	}
-	iwg.Wait()
 
+	iwg.Wait()
 	output.Close()
 }
 

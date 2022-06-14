@@ -16,6 +16,8 @@ dnstap \- Capture, display, and relay Dnstap data.
 .br
 .B "	  [ -T \fIhost:port\fB [ -T \fIhost2:port2\fB ... ] ]"
 .br
+.B "	  [ -S \fIs3-bucket-name\fB [ -U \fIs3-bucket-name2\fB ... ] ]"
+.br
 .B "	  [ -w \fIfile\fB ] [ -q | -y | -j ] [-a]"
 .br
 .B "	  [ -t \fItimeout\fB ]"
@@ -81,6 +83,13 @@ Relay Dnstap data over a TCP/IP connection to \fIhost:port\fR.
 
 The \fB-T\fR option may be given multiple times to relay Dnstap data
 to multiple addresses.
+
+.TP
+.B -S \fIs3-bucket-name\fR
+Write Dnstap data as json to the S3 bucket \fIs3-bucket-name\fR.
+
+The \fB-S\fR option may be given multiple times to write Dnstap data
+to multiple buckets.
 
 .TP
 .B -t \fItimeout\fR
