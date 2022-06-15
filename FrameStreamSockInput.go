@@ -64,7 +64,7 @@ func (input *FrameStreamSockInput) SetLogger(logger Logger) {
 // If a socket or other file already exists at socketPath,
 // NewFrameStreamSockInputFromPath removes it before creating the socket.
 func NewFrameStreamSockInputFromPath(socketPath string) (input *FrameStreamSockInput, err error) {
-	os.Remove(socketPath)
+	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return
@@ -128,7 +128,7 @@ func (input *FrameStreamSockInput) ReadInto(output chan []byte) {
 			input.log.Printf("%s: closed connection %d%s",
 				conn.LocalAddr(), cn, origin)
 			waitGroup.Done()
-			connections.Delete(n)
+			connections.Delete(cn)
 		}(n)
 	}
 }
