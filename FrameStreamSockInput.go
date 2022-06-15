@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,7 @@ func NewFrameStreamSockInput(listener net.Listener) (input *FrameStreamSockInput
 	input = new(FrameStreamSockInput)
 	input.listener = listener
 	input.log = &nullLogger{}
+	input.wait = make(chan bool)
 	return
 }
 
@@ -77,15 +79,36 @@ func NewFrameStreamSockInputFromPath(socketPath string) (input *FrameStreamSockI
 // ReadInto satisfies the dnstap Input interface.
 func (input *FrameStreamSockInput) ReadInto(output chan []byte) {
 	var n uint64
+	connections := sync.Map{}
+	waitGroup := sync.WaitGroup{}
+
+	// closes all outstanding connections on exit
+	defer func() {
+		connections.Range(func(key, value interface{}) bool {
+			if c, ok := value.(net.Conn); ok {
+				if err := c.Close(); err != nil {
+					input.log.Printf("ignoring %s", err)
+				}
+			}
+			connections.Delete(key)
+			return false
+		})
+		waitGroup.Wait()
+		close(input.wait)
+	}()
+
 	for {
 		conn, err := input.listener.Accept()
 		if err != nil {
 			input.log.Printf("%s: accept failed: %v\n",
 				input.listener.Addr(),
 				err)
-			continue
+			return
 		}
 		n++
+		waitGroup.Add(1)
+		connections.Store(n, conn)
+
 		origin := ""
 		switch conn.RemoteAddr().Network() {
 		case "tcp", "tcp4", "tcp6":
@@ -104,14 +127,20 @@ func (input *FrameStreamSockInput) ReadInto(output chan []byte) {
 			i.ReadInto(output)
 			input.log.Printf("%s: closed connection %d%s",
 				conn.LocalAddr(), cn, origin)
+			waitGroup.Done()
+			connections.Delete(n)
 		}(n)
 	}
 }
 
 // Wait satisfies the dnstap Input interface.
-//
-// The FrameSTreamSocketInput Wait method never returns, because the
-// corresponding Readinto method also never returns.
 func (input *FrameStreamSockInput) Wait() {
-	select {}
+	_, _ = <-input.wait
+}
+
+// Close the listener
+func (input *FrameStreamSockInput) Close() {
+	if err := input.listener.Close(); err != nil {
+		input.log.Printf("failed to close listener, %s", err)
+	}
 }

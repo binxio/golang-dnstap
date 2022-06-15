@@ -30,6 +30,11 @@ type FrameStreamSockOutput struct {
 	wopt          SocketWriterOptions
 }
 
+// Flush any pending output. Noop for this type
+func (o *FrameStreamSockOutput) Flush() {
+	// no buffer available to explicitly flush
+}
+
 // NewFrameStreamSockOutput creates a FrameStreamSockOutput manaaging a
 // connection to the given address.
 func NewFrameStreamSockOutput(address net.Addr) (*FrameStreamSockOutput, error) {

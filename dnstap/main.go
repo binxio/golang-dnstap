@@ -23,9 +23,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type stringList []string
@@ -72,6 +74,7 @@ var logger = log.New(os.Stderr, "", log.LstdFlags)
 func main() {
 	var tcpOutputs, unixOutputs, s3Outputs stringList
 	var fileInputs, tcpInputs, unixInputs stringList
+	allSocketInputs := make([]*dnstap.FrameStreamSockInput, 0)
 
 	flag.Var(&tcpOutputs, "T", "write dnstap payloads to tcp/ip address")
 	flag.Var(&unixOutputs, "U", "write dnstap payloads to unix socket")
@@ -133,7 +136,6 @@ func main() {
 				*flagWriteFile, err)
 			os.Exit(1)
 		}
-		go o.RunOutputLoop()
 		output.Add(o)
 	}
 
@@ -160,6 +162,7 @@ func main() {
 		}
 		i.SetTimeout(*flagTimeout)
 		i.SetLogger(logger)
+		allSocketInputs = append(allSocketInputs, i)
 		fmt.Fprintf(os.Stderr, "dnstap: opened input socket %s\n", path)
 		iwg.Add(1)
 		go runInput(i, output, &iwg)
@@ -173,9 +176,28 @@ func main() {
 		i := dnstap.NewFrameStreamSockInput(l)
 		i.SetTimeout(*flagTimeout)
 		i.SetLogger(logger)
+		allSocketInputs = append(allSocketInputs, i)
 		iwg.Add(1)
 		go runInput(i, output, &iwg)
 	}
+
+	go func() {
+		signals := make(chan os.Signal, 5)
+		signal.Notify(signals, os.Interrupt)
+		signal.Notify(signals, syscall.SIGINT)
+		signal.Notify(signals, syscall.SIGTERM)
+		signal.Notify(signals, syscall.SIGHUP)
+		for s := range signals {
+			if s == syscall.SIGHUP {
+				output.Flush()
+			} else {
+				for _, v := range allSocketInputs {
+					v.Close()
+				}
+				close(signals)
+			}
+		}
+	}()
 
 	iwg.Wait()
 	output.Close()
@@ -209,7 +231,6 @@ func addSockOutputs(mo *mirrorOutput, network string, addrs stringList) error {
 		}
 		o.SetTimeout(*flagTimeout)
 		o.SetLogger(logger)
-		go o.RunOutputLoop()
 		mo.Add(o)
 	}
 	return nil

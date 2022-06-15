@@ -101,15 +101,20 @@ func (input *FrameStreamInput) ReadInto(output chan []byte) {
 		if err != io.EOF {
 			input.log.Printf("FrameStreamInput: Read error: %v", err)
 		}
-
 		break
 	}
 	close(input.wait)
 }
 
-// Wait reeturns when ReadInto has finished.
+// Wait returns when ReadInto has finished.
 //
 // Wait satisfies the dnstap Input interface.
 func (input *FrameStreamInput) Wait() {
 	<-input.wait
+}
+
+// Close the input file, this implementation is not quite correct
+// as it does not close the input frame.
+func (input *FrameStreamInput) Close() {
+	close(input.wait)
 }

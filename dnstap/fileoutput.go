@@ -19,11 +19,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
-
 	dnstap "github.com/dnstap/golang-dnstap"
+	"os"
 )
 
 // Output channel buffer size value from main dnstap package.
@@ -45,6 +42,7 @@ type fileOutput struct {
 	output    dnstap.Output
 	data      chan []byte
 	done      chan struct{}
+	flush     chan struct{}
 }
 
 func openOutputFile(filename string, formatter dnstap.TextFormatFunc, doAppend bool) (o dnstap.Output, err error) {
@@ -91,6 +89,7 @@ func newFileOutput(filename string, formatter dnstap.TextFormatFunc, doAppend bo
 		output:    o,
 		data:      make(chan []byte, outputChannelSize),
 		done:      make(chan struct{}),
+		flush:     make(chan struct{}),
 	}, nil
 }
 
@@ -103,9 +102,11 @@ func (fo *fileOutput) Close() {
 	<-fo.done
 }
 
+func (fo *fileOutput) Flush() {
+	fo.flush <- struct{}{}
+}
+
 func (fo *fileOutput) RunOutputLoop() {
-	sigch := make(chan os.Signal, 1)
-	signal.Notify(sigch, os.Interrupt, syscall.SIGHUP)
 	o := fo.output
 	go o.RunOutputLoop()
 	defer func() {
@@ -119,21 +120,17 @@ func (fo *fileOutput) RunOutputLoop() {
 				return
 			}
 			o.GetOutputChannel() <- b
-		case sig := <-sigch:
-			if sig == syscall.SIGHUP {
-				o.Close()
-				newo, err := openOutputFile(fo.filename, fo.formatter, fo.doAppend)
-				if err != nil {
-					fmt.Fprintf(os.Stderr,
-						"dnstap: Error: failed to reopen %s: %v\n",
-						fo.filename, err)
-					os.Exit(1)
-				}
-				o = newo
-				go o.RunOutputLoop()
-				continue
+		case <-fo.flush:
+			o.Close()
+			newo, err := openOutputFile(fo.filename, fo.formatter, fo.doAppend)
+			if err != nil {
+				fmt.Fprintf(os.Stderr,
+					"dnstap: Error: failed to reopen %s: %v\n",
+					fo.filename, err)
+				os.Exit(1)
 			}
-			os.Exit(0)
+			o = newo
+			go o.RunOutputLoop()
 		}
 	}
 }

@@ -18,12 +18,14 @@ package main
 
 import (
 	dnstap "github.com/dnstap/golang-dnstap"
+	"sync"
 )
 
 type mirrorOutput struct {
-	outputs []dnstap.Output
-	data    chan []byte
-	done    chan struct{}
+	outputs   []dnstap.Output
+	data      chan []byte
+	done      chan struct{}
+	waitGroup sync.WaitGroup
 }
 
 func newMirrorOutput() *mirrorOutput {
@@ -33,25 +35,50 @@ func newMirrorOutput() *mirrorOutput {
 	}
 }
 
+func (mo *mirrorOutput) Flush() {
+	for _, output := range mo.outputs {
+		output.Flush()
+	}
+}
+
 func (mo *mirrorOutput) Add(o dnstap.Output) {
+	mo.waitGroup.Add(1)
+	go func() {
+		o.RunOutputLoop()
+		mo.waitGroup.Done()
+	}()
 	mo.outputs = append(mo.outputs, o)
 }
 
+// RunOutputLoop copies all dnstap messages into the all the channel of each of the output tqps.
+// it stops when the input data channel is closed.
 func (mo *mirrorOutput) RunOutputLoop() {
-	for b := range mo.data {
+	defer func() {
 		for _, o := range mo.outputs {
-			o.GetOutputChannel() <- b
+			o.Close()
+		}
+	}()
+
+	for {
+		select {
+		case b, ok := <-mo.data:
+			if !ok {
+				return
+			}
+			for _, o := range mo.outputs {
+				o.GetOutputChannel() <- b
+			}
+		case <-mo.done:
+			return
 		}
 	}
-	for _, o := range mo.outputs {
-		o.Close()
-	}
-	close(mo.done)
 }
 
 func (mo *mirrorOutput) Close() {
+	mo.done <- struct{}{}
+	close(mo.done)
 	close(mo.data)
-	<-mo.done
+	mo.waitGroup.Wait()
 }
 
 func (mo *mirrorOutput) GetOutputChannel() chan []byte {

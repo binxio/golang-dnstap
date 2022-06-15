@@ -29,6 +29,11 @@ type FrameStreamOutput struct {
 	log           Logger
 }
 
+// Flush any pending output. Noop for this type
+func (o *FrameStreamOutput) Flush() {
+	// cannot flush a stream output
+}
+
 // NewFrameStreamOutput creates a FrameStreamOutput writing dnstap data to
 // the given io.Writer.
 func NewFrameStreamOutput(w io.Writer) (o *FrameStreamOutput, err error) {
@@ -79,14 +84,13 @@ func (o *FrameStreamOutput) GetOutputChannel() chan []byte {
 //
 // RunOutputLoop satisfies the dnstap Output interface.
 func (o *FrameStreamOutput) RunOutputLoop() {
+	defer close(o.wait)
 	for frame := range o.outputChannel {
 		if _, err := o.w.WriteFrame(frame); err != nil {
 			o.log.Printf("FrameStreamOutput: Write error: %v, returning", err)
-			close(o.wait)
 			return
 		}
 	}
-	close(o.wait)
 }
 
 // Close closes the channel returned from GetOutputChannel, and flushes
@@ -95,6 +99,10 @@ func (o *FrameStreamOutput) RunOutputLoop() {
 // Close satisifies the dnstap Output interface.
 func (o *FrameStreamOutput) Close() {
 	close(o.outputChannel)
-	<-o.wait
 	o.w.Close()
+}
+
+// Wait until output stream is closed
+func (o *FrameStreamOutput) Wait() {
+	<-o.wait
 }

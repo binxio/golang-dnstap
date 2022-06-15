@@ -29,9 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -48,6 +46,12 @@ type S3Output struct {
 	log          dnstap.Logger
 	data         chan []byte
 	done         chan struct{}
+	flush        chan struct{}
+}
+
+// Flush any pending output.
+func (o *S3Output) Flush() {
+	o.flush <- struct{}{}
 }
 
 // SetLogger configures a logger for error events in the TextOutput
@@ -192,6 +196,7 @@ func newS3Output(ctx context.Context, bucketName string) (*S3Output, error) {
 		buffer:       new(bytes.Buffer),
 		data:         make(chan []byte, outputChannelSize),
 		done:         make(chan struct{}),
+		flush:        make(chan struct{}),
 	}, nil
 }
 
@@ -200,14 +205,15 @@ func (o *S3Output) GetOutputChannel() chan []byte {
 	return o.data
 }
 
-// Close flush buffer and close output
+// Close write buffer to bucket and close output
 func (o *S3Output) Close() {
-	o.flush()
+	o.toBucket()
 	close(o.data)
+	close(o.flush)
 	<-o.done
 }
 
-func (o *S3Output) flush() {
+func (o *S3Output) toBucket() {
 	if o.buffer.Len() == 0 {
 		return
 	}
@@ -254,64 +260,61 @@ func (o *S3Output) flush() {
 
 // RunOutputLoop writes dnstap messages to the s3 bucket
 func (o *S3Output) RunOutputLoop() {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	signal.Notify(signals, os.Interrupt, syscall.SIGINT)
 	ticker := time.NewTicker(o.flushPeriod)
 
 	defer func() {
-		o.log.Printf("closing S3 output")
 		ticker.Stop()
-		o.Close()
 		close(o.done)
 	}()
 	for {
 		select {
 		case frame, ok := <-o.data:
 			if !ok {
+				o.toBucket()
 				return
 			}
-			message := dnstap.Dnstap{}
-			if err := proto.Unmarshal(frame, &message); err != nil {
-				o.log.Printf("dnstap.s3: proto.Unmarshal() failed: %s\n", err)
-				break
-			}
-			json, ok := dnstap.JSONFormat(&message)
-			if !ok {
-				o.log.Printf("dnstap.s3: text format function failed\n")
-				break
-			}
-			if _, err := o.buffer.Write(json); err != nil {
-				o.log.Printf("dnstap.s3: write error: %v, returning\n", err)
-				break
-			}
+
+			o.frameToBuffer(frame)
+
 			if o.buffer.Len() > o.maxCacheSize {
-				o.flush()
+				o.toBucket()
 			}
+
+		case <-o.flush:
+			o.toBucket()
 
 		case <-ticker.C:
-			o.flush()
-
-		case signal := <-signals:
-			o.log.Printf("dnstap.s3 received signal %v\n", signal)
-			o.flush()
-			close(signals)
-			// This is not as it is supposed to be, but as it is done in fileoutput.
-			// the signal should be caught by the main loop.
-			os.Exit(1)
-			return
+			o.toBucket()
 		}
 	}
 }
 
+// frameToBuffer writes the DNSTap frame as json into the buffer
+func (o *S3Output) frameToBuffer(frame []byte) {
+	message := dnstap.Dnstap{}
+	if err := proto.Unmarshal(frame, &message); err != nil {
+		o.log.Printf("dnstap.s3: proto.Unmarshal() failed: %s\n", err)
+		return
+	}
+	json, ok := dnstap.JSONFormat(&message)
+	if !ok {
+		o.log.Printf("dnstap.s3: text format function failed\n")
+		return
+	}
+
+	if _, err := o.buffer.Write(json); err != nil {
+		o.log.Printf("dnstap.s3: write error: %v, returning\n", err)
+		return
+	}
+}
+
+// addS3Outputs adds an S3Output for each of the specified buckets
 func addS3Outputs(mo *mirrorOutput, buckets stringList) error {
 	for _, bucket := range buckets {
-
 		output, err := newS3Output(context.Background(), bucket)
 		if err != nil {
 			return err
 		}
-		go output.RunOutputLoop()
 		mo.Add(output)
 	}
 	return nil

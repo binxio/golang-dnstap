@@ -36,6 +36,13 @@ type TextOutput struct {
 	log           Logger
 }
 
+// Flush any buffer output.
+func (o *TextOutput) Flush() {
+	if err := o.writer.Flush(); err != nil {
+		o.log.Printf("ignoring %s", err)
+	}
+}
+
 // NewTextOutput creates a TextOutput writing dnstap data to the given io.Writer
 // in the text format given by the TextFormatFunc format.
 func NewTextOutput(writer io.Writer, format TextFormatFunc) (o *TextOutput) {

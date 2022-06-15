@@ -29,6 +29,7 @@ var FSContentType = []byte("protobuf:dnstap.Dnstap")
 type Input interface {
 	ReadInto(chan []byte)
 	Wait()
+	Close()
 }
 
 // An Output is a destination for dnstap data. It accepts data on the channel
@@ -39,6 +40,7 @@ type Output interface {
 	GetOutputChannel() chan []byte
 	RunOutputLoop()
 	Close()
+	Flush()
 }
 
 // A Logger prints a formatted log message to the destination of the
