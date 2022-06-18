@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -100,9 +101,11 @@ func (input *FrameStreamSockInput) ReadInto(output chan []byte) {
 	for {
 		conn, err := input.listener.Accept()
 		if err != nil {
-			input.log.Printf("%s: accept failed: %v\n",
-				input.listener.Addr(),
-				err)
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				input.log.Printf("%s: accept failed: %v\n",
+					input.listener.Addr(),
+					err)
+			}
 			return
 		}
 		n++
@@ -135,7 +138,7 @@ func (input *FrameStreamSockInput) ReadInto(output chan []byte) {
 
 // Wait satisfies the dnstap Input interface.
 func (input *FrameStreamSockInput) Wait() {
-	_, _ = <-input.wait
+	<-input.wait
 }
 
 // Close the listener
