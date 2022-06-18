@@ -19,6 +19,7 @@ package dnstap
 import (
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -38,6 +39,7 @@ var MaxPayloadSize uint32 = 96 * 1024
 // A FrameStreamInput reads dnstap data from an io.ReadWriter.
 type FrameStreamInput struct {
 	wait   chan bool
+	done   chan bool
 	reader Reader
 	log    Logger
 }
@@ -64,6 +66,7 @@ func NewFrameStreamInputTimeout(r io.ReadWriter, bi bool, timeout time.Duration)
 
 	return &FrameStreamInput{
 		wait:   make(chan bool),
+		done:   make(chan bool),
 		reader: reader,
 		log:    nullLogger{},
 	}, nil
@@ -89,21 +92,32 @@ func (input *FrameStreamInput) SetLogger(logger Logger) {
 // ReadInto satisfies the dnstap Input interface.
 func (input *FrameStreamInput) ReadInto(output chan []byte) {
 	buf := make([]byte, MaxPayloadSize)
+
+	defer close(input.wait)
 	for {
 		n, err := input.reader.ReadFrame(buf)
 		if err == nil {
 			newbuf := make([]byte, n)
 			copy(newbuf, buf)
 			output <- newbuf
+
+			select {
+			case <-input.done:
+				// close requested
+				return
+			default:
+				// continue reading
+			}
 			continue
 		}
 
 		if err != io.EOF {
-			input.log.Printf("FrameStreamInput: Read error: %v", err)
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				input.log.Printf("FrameStreamInput: Read error: %v", err)
+			}
 		}
 		break
 	}
-	close(input.wait)
 }
 
 // Wait returns when ReadInto has finished.
@@ -113,8 +127,9 @@ func (input *FrameStreamInput) Wait() {
 	<-input.wait
 }
 
-// Close the input file, this implementation is not quite correct
-// as it does not close the input frame.
+// Close the input.
 func (input *FrameStreamInput) Close() {
-	close(input.wait)
+	input.done <- true
+	close(input.done)
+	<-input.wait
 }
