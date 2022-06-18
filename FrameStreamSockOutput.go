@@ -116,7 +116,6 @@ func (o *FrameStreamSockOutput) RunOutputLoop() {
 
 	w.Close()
 	close(o.wait)
-	return
 }
 
 // Close shuts down the FrameStreamSockOutput's output channel and returns
